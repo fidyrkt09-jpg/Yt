@@ -1,0 +1,6 @@
+{
+  "name": "YT-DLP Bot Controller",
+  "description": "Android app integrated with yt-dlp, controlled remotely via Telegram bot with an AI-guided assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
