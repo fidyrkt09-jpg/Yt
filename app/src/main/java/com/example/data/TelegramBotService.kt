@@ -11,6 +11,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
 import org.json.JSONObject
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
@@ -30,8 +33,15 @@ class OkHttpDownloader private constructor(private val client: OkHttpClient) : D
 
     override fun execute(request: NpRequest): NpResponse {
         val builder = Request.Builder().url(request.url())
+        
+        // Headers par défaut pour satisfaire InnerTube (YouTube)
+        builder.addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        builder.addHeader("Accept-Language", "en-US,en;q=0.9")
+        builder.addHeader("X-YouTube-Client-Name", "1")
+        builder.addHeader("X-YouTube-Client-Version", "2.20240101.01.00")
+
         request.headers().forEach { (key, values) ->
-            values.forEach { builder.addHeader(key, it) }
+            values.forEach { builder.header(key, it) } // On utilise header() pour écraser si NewPipe fournit mieux
         }
         val body = request.dataToSend()?.let {
             it.toRequestBody("application/x-www-form-urlencoded".toMediaTypeOrNull())
@@ -73,6 +83,15 @@ object TelegramBotService {
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
+        .cookieJar(object : CookieJar {
+            private val cache = mutableMapOf<String, List<Cookie>>()
+            override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+                cache[url.host] = cookies
+            }
+            override fun loadForRequest(url: HttpUrl): List<Cookie> {
+                return cache[url.host] ?: listOf()
+            }
+        })
         .build()
 
     private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
