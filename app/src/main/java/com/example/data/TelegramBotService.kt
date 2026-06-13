@@ -20,6 +20,8 @@ import org.schabi.newpipe.extractor.downloader.Response as NpResponse
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.VideoStream
 import org.schabi.newpipe.extractor.stream.AudioStream
+import org.schabi.newpipe.extractor.localization.ContentCountry
+import org.schabi.newpipe.extractor.localization.Localization
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -94,8 +96,12 @@ object TelegramBotService {
     fun initialize(context: Context) {
         settings = BotSettingsManager(context)
         // Init NewPipeExtractor avec notre downloader OkHttp
-        NewPipe.init(OkHttpDownloader.getInstance(client))
-        addLog("Application initialisée (NewPipeExtractor v0.26.3).")
+        NewPipe.init(
+            OkHttpDownloader.getInstance(client),
+            Localization.DEFAULT,
+            ContentCountry.DEFAULT
+        )
+        addLog("Application initialisée (NewPipeExtractor v0.26.2).")
         if (settings?.isPollingActive?.value == true) startPolling(context)
     }
 
@@ -351,7 +357,9 @@ object TelegramBotService {
         try {
             // StreamInfo.getInfo() fait tout : page scraping + déchiffrement JS (Rhino)
             val info: StreamInfo = withContext(Dispatchers.IO) {
-                StreamInfo.getInfo(ServiceList.YouTube, url)
+                val extractor = ServiceList.YouTube.getStreamExtractor(url)
+                extractor.fetchPage()
+                StreamInfo.getInfo(extractor)
             }
 
             val title    = info.name

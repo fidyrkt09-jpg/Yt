@@ -123,5 +123,5 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
   coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.4")
-  implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.3")
+  implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.2")
 }
