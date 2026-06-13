@@ -45,6 +45,29 @@ class MainActivity : ComponentActivity() {
         // Initialize the service so settings and autostart are loaded
         TelegramBotService.initialize(applicationContext)
         
+        // Request runtime permissions if on Marshmallow or higher
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            val permissions = mutableListOf<String>()
+            
+            // For Android 12 (API 32) and below, request READ_EXTERNAL_STORAGE
+            if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.S_V2) {
+                permissions.add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+            
+            // For Android 9 (API 28) and below, request WRITE_EXTERNAL_STORAGE
+            if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.P) {
+                permissions.add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+            
+            // For Android 13+ (API 33+), there are granular permissions like READ_MEDIA_VIDEO and READ_MEDIA_AUDIO,
+            // but since we are downloading to public/internal folders and read-writing files we created,
+            // standard permissions are sufficient or handled by fallback.
+            
+            if (permissions.isNotEmpty()) {
+                requestPermissions(permissions.toTypedArray(), 101)
+            }
+        }
+        
         setContent {
             MyApplicationTheme {
                 Scaffold(

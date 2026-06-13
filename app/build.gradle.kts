@@ -121,5 +121,5 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
-  implementation("com.github.sealedtx:java-youtube-downloader:3.0.1")
+  implementation("com.github.sealedtx:java-youtube-downloader:3.0.2")
 }

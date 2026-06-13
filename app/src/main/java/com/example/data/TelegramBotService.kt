@@ -127,7 +127,7 @@ object TelegramBotService {
             logs.add(0, "[$timestamp] $message")
             // Cap log capacity dynamically
             if (logs.size > 100) {
-                logs.removeLast()
+                logs.removeAt(logs.lastIndex)
             }
         }
     }
@@ -410,7 +410,10 @@ object TelegramBotService {
             }
 
             if (!response.ok()) {
-                sendTelegramMessage(token, chatId, "❌ Échec de la récupération des métadonnées de la vidéo.")
+                val errorMsg = response.error()?.message ?: "Aucune cause d'erreur disponible"
+                Log.e(TAG, "Échec de getVideoInfo pour videoId=$videoId: $errorMsg")
+                sendTelegramMessage(token, chatId, "❌ Échec de la récupération des métadonnées de la vidéo.\n\n⚠️ *Raison* : `$errorMsg` (Identifiant: `$videoId`)")
+                addLog("Échec métadonnées ($videoId) : $errorMsg")
                 return
             }
 
@@ -526,81 +529,92 @@ object TelegramBotService {
                 downloadSpeed.value = "0 Ko/s"
             }
 
+            initialDownloadStartTime = System.currentTimeMillis() // Reset speed clock
             val outDir = StorageHelper.getDownloadDirectory(context)
-            val downloader = YoutubeDownloader()
+            val downloadUrl = format.url() ?: throw Exception("Stream URL est vide ou non disponible.")
 
             var lastProgressTime = System.currentTimeMillis()
             var lastProgressSentPct = 0
 
-            val request = RequestVideoFileDownload(format)
-                .saveTo(outDir)
-                .renameTo(fileTitle)
-                .overwriteIfExists(true)
-                .callback(object : YoutubeProgressCallback<File> {
-                    override fun onDownloading(progress: Int) {
-                        scope.launch(Dispatchers.Main) {
-                            downloadProgress.value = progress
-                        }
-
-                        val now = System.currentTimeMillis()
-                        // Throttled notification updates to avoid hitting Telegram's rate-limits!
-                        // Updates Telegram every 10% progress increment or every 4 seconds
-                        if (progress - lastProgressSentPct >= 10 || (now - lastProgressTime >= 4000 && progress != lastProgressSentPct)) {
-                            lastProgressSentPct = progress
-                            lastProgressTime = now
-                            
-                            val speed = calculateSpeedEstimate(totalSizeInBytes, progress, now)
-                            scope.launch(Dispatchers.Main) {
-                                downloadSpeed.value = speed
-                            }
-
-                            scope.launch {
-                                sendTelegramMessage(token, chatId, "📥 *Progression* : `$progress%` | Vitesse : `$speed` de `$cleanFilename`")
-                            }
-                        }
-                    }
-
-                    override fun onFinished(file: File) {
-                        // Rename standard library generated file to the custom/sanitized file
-                        val targetFile = File(outDir, cleanFilename)
-                        if (file.name != cleanFilename) {
-                            file.renameTo(targetFile)
-                        }
-
-                        scope.launch {
-                            val successMsg = "🎉 *Téléchargement Réussi!*\n\n" +
-                                    "📁 *Fichier* : `${cleanFilename}`\n" +
-                                    "📦 *Taille* : ${formatBytes(targetFile.length())}\n" +
-                                    "📍 *Chemin* : `${targetFile.absolutePath}`"
-                            sendTelegramMessage(token, chatId, successMsg)
-                            addLog("Terminé : $cleanFilename")
-                            
-                            withContext(Dispatchers.Main) {
-                                activeDownloadTitle.value = ""
-                                downloadProgress.value = 100
-                                downloadSpeed.value = "Terminé"
-                            }
-                        }
-                    }
-
-                    override fun onError(throwable: Throwable) {
-                        scope.launch {
-                            sendTelegramMessage(token, chatId, "❌ *Erreur lors du téléchargement* : ${throwable.message}")
-                            addLog("Échec téléchargement : ${throwable.message}")
-                            withContext(Dispatchers.Main) {
-                                activeDownloadTitle.value = ""
-                            }
-                        }
-                    }
-                })
-
             withContext(Dispatchers.IO) {
-                downloader.downloadVideoFile(request)
+                val okRequest = Request.Builder()
+                    .url(downloadUrl)
+                    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .addHeader("Accept", "*/*")
+                    .addHeader("Connection", "keep-alive")
+                    .build()
+
+                val targetFile = File(outDir, cleanFilename)
+                if (targetFile.exists()) {
+                    targetFile.delete()
+                }
+
+                client.newCall(okRequest).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        throw Exception("Erreur réseau HTTP: ${response.code} ${response.message}")
+                    }
+                    val body = response.body ?: throw Exception("Le corps de la réponse HTTP de flux est vide.")
+                    val totalBytes = if (totalSizeInBytes > 0) totalSizeInBytes else body.contentLength()
+                    val actualBytesToDownload = if (totalBytes > 0) totalBytes else 1L
+
+                    body.byteStream().use { inputStream ->
+                        targetFile.outputStream().use { outputStream ->
+                            val buffer = ByteArray(64 * 1024) // 64 Ko lightning buffer (NewPipe style)
+                            var bytesRead: Long = 0
+                            var read = inputStream.read(buffer)
+
+                            while (read != -1) {
+                                outputStream.write(buffer, 0, read)
+                                bytesRead += read
+
+                                val progress = ((bytesRead.toDouble() / actualBytesToDownload.toDouble()) * 100).toInt().coerceIn(0, 100)
+
+                                scope.launch(Dispatchers.Main) {
+                                    downloadProgress.value = progress
+                                }
+
+                                val now = System.currentTimeMillis()
+                                if (progress - lastProgressSentPct >= 10 || (now - lastProgressTime >= 4000 && progress != lastProgressSentPct)) {
+                                    lastProgressSentPct = progress
+                                    lastProgressTime = now
+
+                                    val speed = calculateSpeedEstimate(actualBytesToDownload, progress, now)
+                                    scope.launch(Dispatchers.Main) {
+                                        downloadSpeed.value = speed
+                                    }
+
+                                    scope.launch {
+                                        sendTelegramMessage(token, chatId, "📥 *Progression* : `$progress%` | Vitesse : `$speed` de `$cleanFilename`")
+                                    }
+                                }
+
+                                read = inputStream.read(buffer)
+                            }
+                        }
+                    }
+
+                    // On successful download completion
+                    scope.launch {
+                        val successMsg = "🎉 *Téléchargement Réussi (Moteur Perso)!*\n\n" +
+                                "📁 *Fichier* : `${cleanFilename}`\n" +
+                                "📦 *Taille* : ${formatBytes(targetFile.length())}\n" +
+                                "📍 *Chemin* : `${targetFile.absolutePath}`"
+                        sendTelegramMessage(token, chatId, successMsg)
+                        addLog("Terminé : $cleanFilename")
+
+                        withContext(Dispatchers.Main) {
+                            activeDownloadTitle.value = ""
+                            downloadProgress.value = 100
+                            downloadSpeed.value = "Terminé"
+                        }
+                    }
+                }
             }
 
         } catch (e: Exception) {
             Log.e(TAG, "Download trigger failed", e)
-            sendTelegramMessage(token, chatId, "❌ Erreur critique lors de l'envoi au moteur : ${e.message}")
+            sendTelegramMessage(token, chatId, "❌ Erreur moteur de téléchargement : ${e.message}")
+            addLog("Échec téléchargement : ${e.message}")
             withContext(Dispatchers.Main) {
                 activeDownloadTitle.value = ""
             }
@@ -652,14 +666,36 @@ object TelegramBotService {
     }
 
     private fun extractVideoId(url: String): String? {
-        val pattern = "^(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/(?:[^\\/\\n\\s]+\\/\\S+\\/|(?:v|e(?:mbed)?)\\/|\\S*?[?&]v=)|youtu\\.be\\/)([a-zA-Z0-9_-]{11})"
-        val compiledPattern = java.util.regex.Pattern.compile(pattern)
-        val matcher = compiledPattern.matcher(url)
-        return if (matcher.find()) {
-            matcher.group(1)
-        } else {
-            null
+        val trimmed = url.trim()
+        if (trimmed.isEmpty()) return null
+        
+        // 1. Try to find v=XXXX parameter (covers youtube.com/watch?v=ID, m.youtube.com/watch?v=ID, etc.)
+        val vParamPattern = java.util.regex.Pattern.compile("[?&]v=([a-zA-Z0-9_-]{11})")
+        val vParamMatcher = vParamPattern.matcher(trimmed)
+        if (vParamMatcher.find()) {
+            return vParamMatcher.group(1)
         }
+        
+        // 2. Try to find youtu.be/XXXX (covers youtu.be/ID)
+        val shortLinkPattern = java.util.regex.Pattern.compile("youtu\\.be/([a-zA-Z0-9_-]{11})")
+        val shortLinkMatcher = shortLinkPattern.matcher(trimmed)
+        if (shortLinkMatcher.find()) {
+            return shortLinkMatcher.group(1)
+        }
+        
+        // 3. Try to find shorts/XXXX or embed/XXXX or v/XXXX or live/XXXX
+        val pathPattern = java.util.regex.Pattern.compile("/(?:shorts|embed|v|live)/([a-zA-Z0-9_-]{11})")
+        val pathMatcher = pathPattern.matcher(trimmed)
+        if (pathMatcher.find()) {
+            return pathMatcher.group(1)
+        }
+        
+        // Fallback: If it's a raw 11-character alphanumeric string, return it
+        if (trimmed.length == 11 && trimmed.matches("^[a-zA-Z0-9_-]{11}$".toRegex())) {
+            return trimmed
+        }
+        
+        return null
     }
 
     private fun formatBytes(bytes: Long): String {
