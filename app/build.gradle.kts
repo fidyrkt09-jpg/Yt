@@ -51,6 +51,7 @@ android {
     }
   }
   compileOptions {
+    isCoreLibraryDesugaringEnabled = true
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
   }
@@ -121,5 +122,6 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
-  implementation("com.github.sealedtx:java-youtube-downloader:3.0.2")
+  coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.4")
+  implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.3")
 }
