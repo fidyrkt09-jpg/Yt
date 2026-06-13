@@ -95,7 +95,7 @@ object TelegramBotService {
         settings = BotSettingsManager(context)
         // Init NewPipeExtractor avec notre downloader OkHttp
         NewPipe.init(OkHttpDownloader.getInstance(client))
-        addLog("Application initialisée (NewPipeExtractor).")
+        addLog("Application initialisée (NewPipeExtractor v0.26.3).")
         if (settings?.isPollingActive?.value == true) startPolling(context)
     }
 
@@ -560,9 +560,9 @@ object TelegramBotService {
     }
 
     private fun formatBytes(b: Long): String = when {
-        b >= 1024 * 1024 * 1024 -> "%.2f Go".format(b / (1024.0 * 1024.0 * 1024.0))
-        b >= 1024 * 1024     -> "%.2f Mo".format(b / (1024.0 * 1024.0))
-        b >= 1024         -> "%.2f Ko".format(b / 1024.0)
+        b >= 1_073_741_824 -> "%.2f Go".format(b / 1_073_741_824.0)
+        b >= 1_048_576     -> "%.2f Mo".format(b / 1_048_576.0)
+        b >= 1_024         -> "%.2f Ko".format(b / 1_024.0)
         else               -> "$b o"
     }
 
